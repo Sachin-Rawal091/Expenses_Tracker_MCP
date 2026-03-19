@@ -50,6 +50,15 @@ mcp.tool(revoke_all_sessions)
 
 
 if __name__ == "__main__":
+    # ── Auto-Sync Database Schema ──
+    from setup_db import main as setup_database
+    import asyncio
+    try:
+        print("🔄 Checking database schema...")
+        asyncio.run(setup_database())
+    except Exception as e:
+        print(f"⚠️ Database setup skipped/failed: {e}")
+
     # Run over HTTP (SSE) for cloud deployment
     # Railway passes the required port dynamically via the PORT environment variable
     port = int(os.environ.get("PORT", "8000"))
