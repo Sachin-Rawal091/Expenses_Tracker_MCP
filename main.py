@@ -5,6 +5,7 @@ Registers all expense tools and starts the MCP server.
 """
 
 import os
+import asyncio
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
@@ -31,11 +32,24 @@ mcp = FastMCP(
         "User identification is handled automatically via secure tokens in the connection URL. "
         "1. For the OWNER: Access is permanent via the Master Key in your configuration. "
         "2. For GUESTS: Access is temporary via Session Tokens (sk_sess_...). "
-        "If a user says they are 'unauthenticated' or get an error, advise them to use the `generate_key.py` CLI tool "
-        "and update their connection URL. "
+        "If a user says they are 'unauthenticated' or get an error, advise them to use the `register_user` tool "
+        "to create a Master Key, then update their connection URL. "
         "All data is tied to the user's email and kept strictly isolated."
     ),
 )
+
+@mcp.on_startup
+async def do_startup():
+    """
+    Ensures the database schema is up-to-date as soon as the server boots.
+    """
+    from setup_db import main as setup_database
+    try:
+        print("🔄 Database Auto-Sync starting...")
+        await setup_database()
+        print("✅ Database Auto-Sync complete.")
+    except Exception as e:
+        print(f"⚠️ Database Auto-Sync failed: {e}")
 
 # ── Register tools ──
 mcp.tool(add_expense)
@@ -50,16 +64,9 @@ mcp.tool(revoke_all_sessions)
 
 
 if __name__ == "__main__":
-    # ── Auto-Sync Database Schema ──
-    from setup_db import main as setup_database
-    import asyncio
-    try:
-        print("🔄 Checking database schema...")
-        asyncio.run(setup_database())
-    except Exception as e:
-        print(f"⚠️ Database setup skipped/failed: {e}")
-
-    # Run over HTTP (SSE) for cloud deployment
-    # Railway passes the required port dynamically via the PORT environment variable
+    # Get Port from Railway
     port = int(os.environ.get("PORT", "8000"))
+    
+    # Run over HTTP (SSE) for cloud deployment
+    print(f"🚀 Starting Expense Tracker on port {port}...")
     mcp.run(transport='sse', host='0.0.0.0', port=port)
