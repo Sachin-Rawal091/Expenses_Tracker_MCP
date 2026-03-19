@@ -7,7 +7,7 @@ Now fully asynchronous using asyncpg.
 
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 import asyncpg
 from dotenv import load_dotenv
@@ -48,7 +48,7 @@ def clean_text(text: str | None) -> str | None:
     return cleaned if cleaned else None
 
 
-def normalize_date(text: str | None) -> datetime.date | None:
+def normalize_date(text: str | None) -> date | None:
     """
     Convert natural-language or loose date strings to datetime.date objects.
     (asyncpg strictly requires native date/datetime objects for PostgreSQL DATE types)
