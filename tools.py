@@ -239,6 +239,10 @@ async def revoke_all_sessions(email: str, master_key: str) -> str:
         await conn.close()
 
 
+async def ping_server() -> str:
+    """A simple tool to verify the server is online and tools are loading correctly."""
+    return "✅ Server is online and tools are responsive!"
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  1. ADD EXPENSE
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
