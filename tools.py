@@ -45,6 +45,37 @@ def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
     raise ValueError("❌ No user identity found. Please provide a user_id or use a personalized connection URL.")
 
 
+async def resolve_user_id(conn, identifier: str | int) -> int:
+    """
+    Map a username/string ID to a database BIGINT id.
+    Automatically creates the user and seeds default categories if they don't exist.
+    """
+    # 1. If it's already a positive integer, use it
+    try:
+        if isinstance(identifier, int) or (isinstance(identifier, str) and identifier.isdigit()):
+            return int(identifier)
+    except (ValueError, TypeError):
+        pass
+
+    # 2. Treat as a username
+    username = str(identifier).lower().strip()
+    if not username:
+        raise ValueError("❌ Invalid user identifier.")
+
+    # Try to find the user
+    row = await conn.fetchrow("SELECT id FROM users WHERE username = $1", username)
+    if row:
+        return row['id']
+
+    # Create new user and seed categories
+    user_id = await conn.fetchval(
+        "INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id",
+        username, f"{username}@example.com"
+    )
+    await conn.execute("SELECT seed_default_categories($1)", user_id)
+    return user_id
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  1. ADD EXPENSE
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -71,7 +102,7 @@ async def add_expense(
         ctx: MCP Context (injected automatically).
     """
     try:
-        user_id = get_user_id(user_id, ctx)
+        user_id_raw = get_user_id(user_id, ctx)
     except ValueError as e:
         return str(e)
 
@@ -86,6 +117,9 @@ async def add_expense(
 
     conn = await get_connection()
     try:
+        # Resolve identity -> database ID
+        user_id = await resolve_user_id(conn, user_id_raw)
+
         # Resolve category → id
         category_id = await resolve_category(conn, user_id, category)
 
@@ -147,11 +181,14 @@ async def list_expenses(
         ctx: MCP Context (injected automatically).
     """
     try:
-        user_id = get_user_id(user_id, ctx)
+        user_id_raw = get_user_id(user_id, ctx)
     except ValueError as e:
         return str(e)
+
     conn = await get_connection()
     try:
+        # Resolve identity -> database ID
+        user_id = await resolve_user_id(conn, user_id_raw)
         query = """
             SELECT e.id, e.amount, c.name AS category, sc.name AS subcategory,
                    e.note, e.expense_date
@@ -251,12 +288,15 @@ async def smart_update_expense(
         ctx: MCP Context (injected automatically).
     """
     try:
-        user_id = get_user_id(user_id, ctx)
+        user_id_raw = get_user_id(user_id, ctx)
     except ValueError as e:
         return str(e)
 
     conn = await get_connection()
     try:
+        # Resolve identity -> database ID
+        user_id = await resolve_user_id(conn, user_id_raw)
+
         # Verify the expense belongs to the user
         valid_exp = await conn.fetchrow(
             "SELECT id FROM expenses WHERE id = $1 AND user_id = $2",
@@ -354,12 +394,15 @@ async def delete_expense(
         ctx: MCP Context (injected automatically).
     """
     try:
-        user_id = get_user_id(user_id, ctx)
+        user_id_raw = get_user_id(user_id, ctx)
     except ValueError as e:
         return str(e)
 
     conn = await get_connection()
     try:
+        # Resolve identity -> database ID
+        user_id = await resolve_user_id(conn, user_id_raw)
+
         row = await conn.fetchrow(
             """
             SELECT e.id, e.amount, c.name AS cat_name, sc.name AS subcat_name, e.note, e.expense_date
@@ -426,12 +469,15 @@ async def summarize_expenses(
         ctx: MCP Context (injected automatically).
     """
     try:
-        user_id = get_user_id(user_id, ctx)
+        user_id_raw = get_user_id(user_id, ctx)
     except ValueError as e:
         return str(e)
 
     conn = await get_connection()
     try:
+        # Resolve identity -> database ID
+        user_id = await resolve_user_id(conn, user_id_raw)
+
         if group_by_subcategory:
             select = "c.name AS category, COALESCE(sc.name, '—') AS subcategory, SUM(e.amount) AS total, COUNT(*) AS cnt"
             group = "c.name, sc.name"
@@ -525,7 +571,7 @@ async def reset_data(
         ctx: MCP Context (injected automatically).
     """
     try:
-        user_id = get_user_id(user_id, ctx)
+        user_id_raw = get_user_id(user_id, ctx)
     except ValueError as e:
         return str(e)
 
@@ -539,6 +585,9 @@ async def reset_data(
 
     conn = await get_connection()
     try:
+        # Resolve identity -> database ID
+        user_id = await resolve_user_id(conn, user_id_raw)
+
         async with conn.transaction():
             # Delete in FK-safe order: expenses → subcategories → categories
             res_exp = await conn.execute("DELETE FROM expenses WHERE user_id = $1", user_id)
