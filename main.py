@@ -4,6 +4,7 @@ main.py — FastMCP server entry point for the Expense Tracker.
 Registers all expense tools and starts the MCP server.
 """
 
+import os
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
@@ -42,4 +43,6 @@ mcp.tool(reset_data)
 
 if __name__ == "__main__":
     # Run over HTTP (SSE) for cloud deployment
-    mcp.run(transport='sse', host='0.0.0.0', port=8000)
+    # Railway passes the required port dynamically via the PORT environment variable
+    port = int(os.environ.get("PORT", "8000"))
+    mcp.run(transport='sse', host='0.0.0.0', port=port)
