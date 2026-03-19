@@ -31,7 +31,7 @@ mcp = FastMCP(
         "You are a secure expense tracking assistant. "
         "User identification is handled automatically via secure tokens in the connection URL. "
         "1. For the OWNER: Access is permanent via the Master Key in your configuration. "
-        "2. For GUESTS: Access is temporary via Session Tokens (sk_sess_...). "
+        "2. For GUESTS: Access is temporary via Session Tokens (sess_...). "
         "If a user says they are 'unauthenticated' or get an error, advise them to use the `register_user` tool "
         "to create a Master Key, then update their connection URL. "
         "All data is tied to the user's email and kept strictly isolated."

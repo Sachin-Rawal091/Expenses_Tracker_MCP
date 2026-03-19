@@ -32,9 +32,10 @@ CREATE TABLE IF NOT EXISTS categories (
     user_id BIGINT NOT NULL,
     name VARCHAR(100) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, name),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_user_name_lower ON categories (user_id, LOWER(name));
+
 
 -- 4. Subcategories
 CREATE TABLE IF NOT EXISTS subcategories (
@@ -43,10 +44,11 @@ CREATE TABLE IF NOT EXISTS subcategories (
     user_id BIGINT NOT NULL,
     name VARCHAR(100) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(category_id, name),
     FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_subcategories_cat_name_lower ON subcategories (category_id, LOWER(name));
+
 
 -- 5. Expenses
 CREATE TABLE IF NOT EXISTS expenses (

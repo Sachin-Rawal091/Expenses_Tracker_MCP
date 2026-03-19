@@ -100,14 +100,15 @@ async def resolve_category(conn: asyncpg.Connection, user_id: int, name: str) ->
 
     Returns: category_id (int)
     """
-    name_clean = clean_text(name)
+    name_clean = clean_text(name) if name else None
     if not name_clean:
         raise ValueError("Category name cannot be empty.")
 
     row = await conn.fetchrow(
-        "SELECT id FROM categories WHERE user_id = $1 AND LOWER(name) = LOWER($2)",
+        "SELECT id FROM categories WHERE user_id = $1 AND LOWER(name) = $2",
         user_id, name_clean
     )
+
     if row:
         return row['id']
 
@@ -134,12 +135,12 @@ async def resolve_subcategory(conn: asyncpg.Connection, user_id: int, category_i
 
     Returns: subcategory_id (int)
     """
-    name_clean = clean_text(name)
+    name_clean = clean_text(name).lower() if name else None
     if not name_clean:
         raise ValueError("Subcategory name cannot be empty.")
 
     row = await conn.fetchrow(
-        "SELECT id FROM subcategories WHERE category_id = $1 AND LOWER(name) = LOWER($2)",
+        "SELECT id FROM subcategories WHERE category_id = $1 AND LOWER(name) = $2",
         category_id, name_clean
     )
     if row:

@@ -49,12 +49,16 @@ def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
             
         except (AttributeError, KeyError):
             pass
+            
+        # ⚠️ CRITICAL: In SSE mode, if we haven't found a KEY or TOKEN in the URL, 
+        # we MUST NOT fall back to a user-provided tool argument.
+        return "unauthenticated"
 
-    # 4. Fallback: User-provided argument directly to tool
+    # 4. Local Fallback: User-provided argument directly to tool
     if user_id and user_id != 0:
         return user_id
 
-    # 5. If everything fails, they are unauthenticated.
+    # 5. Default
     return "unauthenticated"
 
 
@@ -109,18 +113,13 @@ async def resolve_user_id(conn, identifier: str | int) -> int:
     if not username:
         raise ValueError("❌ Invalid user identifier.")
 
-    # Try to find the user
+    # ⚠️ SECURITY: Anonymous/unprefixed identifiers are only allowed for lookup, NEVER auto-creation.
+    # Users must register explicitly via the register_user tool.
     row = await conn.fetchrow("SELECT id FROM users WHERE username = $1", username)
     if row:
         return row['id']
 
-    # Create new user and seed categories
-    user_id = await conn.fetchval(
-        "INSERT INTO users (username, email) VALUES ($1, $2) RETURNING id",
-        username, f"{username}@example.com"
-    )
-    await conn.execute("SELECT seed_default_categories($1)", user_id)
-    return user_id
+    raise ValueError(f"❌ User '{username}' not found. Please register first or provide your Master Key.")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -197,16 +196,18 @@ async def create_session_link(email: str, master_key: str, hours: int = 24) -> s
         sess_token = _generate_token("sess_")
         sess_hash = _hash_string(sess_token)
         
-        expiry = datetime.now() + timedelta(hours=hours) if hours and hours > 0 else None
+        if hours <= 0:
+            return "❌ Session duration must be at least 1 hour."
+            
+        expiry = datetime.now() + timedelta(hours=hours)
 
         await conn.execute(
             "INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
             user['id'], sess_hash, expiry
         )
         
-        expiry_str = f"Expires in {hours}h" if hours and hours > 0 else "Never Expires (Persistent)"
         return (
-            f"✅ **Session Created** ({expiry_str})\n\n"
+            f"✅ **Session Created** (Expires in {hours}h)\n\n"
             f"**Your Session Token:** `{sess_token}`\n"
             f"To connect using this session, use the URL parameter:\n"
             f"`.../sse?token={sess_token}`"
@@ -383,6 +384,8 @@ async def list_expenses(
                 query += f" AND e.expense_date >= ${param_idx}::date"
                 params.append(sd)
                 param_idx += 1
+            else:
+                return f"❌ Invalid start_date: '{start_date}'. Please use YYYY-MM-DD or relative terms like 'today'."
 
         if end_date:
             ed = normalize_date(end_date)
@@ -390,6 +393,8 @@ async def list_expenses(
                 query += f" AND e.expense_date <= ${param_idx}::date"
                 params.append(ed)
                 param_idx += 1
+            else:
+                return f"❌ Invalid end_date: '{end_date}'. Please use YYYY-MM-DD or relative terms like 'today'."
 
         if note_search:
             query += f" AND e.note ILIKE ${param_idx}"
@@ -492,12 +497,17 @@ async def smart_update_expense(
             updated_fields.append(f"Category → {category}")
             p_idx += 1
 
+            # If category changes, we MUST either update or clear the subcategory
+            # to prevent trigger violations (subcategory must belong to category).
             if subcategory is not None:
                 subcategory_id = await resolve_subcategory(conn, user_id, category_id, subcategory)
                 set_clauses.append(f"subcategory_id = ${p_idx}")
                 params.append(subcategory_id)
                 updated_fields.append(f"Subcategory → {subcategory}")
                 p_idx += 1
+            else:
+                set_clauses.append(f"subcategory_id = NULL")
+                updated_fields.append("Subcategory → (Cleared due to category change)")
         elif subcategory is not None:
             existing_cat_id = await conn.fetchval(
                 "SELECT category_id FROM expenses WHERE id = $1 AND user_id = $2",
@@ -670,6 +680,8 @@ async def summarize_expenses(
                 query += f" AND e.expense_date >= ${p_idx}::date"
                 params.append(sd)
                 p_idx += 1
+            else:
+                return f"❌ Invalid start_date: '{start_date}'."
 
         if end_date:
             ed = normalize_date(end_date)
@@ -677,6 +689,8 @@ async def summarize_expenses(
                 query += f" AND e.expense_date <= ${p_idx}::date"
                 params.append(ed)
                 p_idx += 1
+            else:
+                return f"❌ Invalid end_date: '{end_date}'."
 
         query += f" GROUP BY {group} ORDER BY {order}"
 
