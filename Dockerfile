@@ -23,4 +23,6 @@ RUN uv sync --frozen || uv sync
 EXPOSE 8000
 
 # Tell Railway what command to run
-CMD ["uv", "run", "python", "main.py"]
+# We use sh -c to run the database setup BEFORE the main server starts
+CMD ["sh", "-c", "uv run python setup_db.py && uv run python main.py"]
+

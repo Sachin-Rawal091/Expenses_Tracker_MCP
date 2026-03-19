@@ -5,7 +5,6 @@ Registers all expense tools and starts the MCP server.
 """
 
 import os
-import asyncio
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
@@ -19,6 +18,7 @@ from tools import (
     register_user,
     create_session_link,
     revoke_all_sessions,
+    ping_server,
 )
 
 # Load .env file for database credentials
@@ -38,28 +38,6 @@ mcp = FastMCP(
     ),
 )
 
-@mcp.on_startup
-async def do_startup():
-    """
-    Ensures the database schema is up-to-date in the background.
-    Does NOT block the server from starting.
-    """
-    from setup_db import main as setup_database
-    import asyncio
-    
-    async def run_sync():
-        try:
-            print("🔄 [Background] Database Auto-Sync starting...")
-            await setup_database()
-            print("✅ [Background] Database Auto-Sync complete.")
-        except Exception as e:
-            print(f"⚠️ [Background] Database Auto-Sync failed: {e}")
-            
-    # CRITICAL: We don't await run_sync() here. 
-    # We fire it off so the server can bind to the port immediately.
-    asyncio.create_task(run_sync())
-
-
 # ── Register tools ──
 mcp.tool(add_expense)
 mcp.tool(list_expenses)
@@ -70,6 +48,7 @@ mcp.tool(reset_data)
 mcp.tool(register_user)
 mcp.tool(create_session_link)
 mcp.tool(revoke_all_sessions)
+mcp.tool(ping_server)
 
 
 if __name__ == "__main__":
