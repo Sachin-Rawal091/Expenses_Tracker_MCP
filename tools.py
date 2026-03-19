@@ -22,11 +22,17 @@ from database import (
 def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
     """
     Resolve the user_id from arguments or session context.
-    Prioritize the 'user_id' from URL query parameters if available.
+    Automatically detects if we are in local (stdio) or web (sse) mode.
     """
-    # 1. Try to get from URL query parameters (e.g. ?user_id=alice_89)
-    if ctx and hasattr(ctx, "request_context"):
-        # We assume request_context is a Starlette-like Request object
+    # 1. Identify context
+    transport = getattr(ctx, "transport", "stdio")
+
+    # 2. Local Mode (stdio): Default to a fixed local user
+    if transport == "stdio":
+        return user_id if (user_id and user_id != 0) else "local_owner"
+
+    # 3. Web Mode (sse): Prioritize URL parameters
+    if transport == "sse" and ctx and hasattr(ctx, "request_context"):
         try:
             query_user = ctx.request_context.query_params.get("user_id")
             if query_user:
@@ -34,13 +40,13 @@ def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
         except (AttributeError, KeyError):
             pass
 
-    # 2. Fallback to provided argument if not 0 / None
-    if user_id and user_id != 0:
-        return user_id
-
-    # 3. Last fallback: Try session_id from Context
+    # 4. Web Fallback: Try session_id from Context
     if ctx and ctx.session_id:
         return f"session_{ctx.session_id[:8]}"
+
+    # 5. Last Fallback: User-provided argument
+    if user_id and user_id != 0:
+        return user_id
 
     raise ValueError("❌ No user identity found. Please provide a user_id or use a personalized connection URL.")
 
