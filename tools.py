@@ -5,6 +5,7 @@ Every tool requires `user_id` to enforce multi-user isolation.
 Fully asynchronous using asyncpg.
 """
 
+from fastmcp import Context
 from database import (
     get_connection,
     normalize_date,
@@ -15,31 +16,65 @@ from database import (
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  0. HELPER: GET USER ID
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
+    """
+    Resolve the user_id from arguments or session context.
+    Prioritize the 'user_id' from URL query parameters if available.
+    """
+    # 1. Try to get from URL query parameters (e.g. ?user_id=alice_89)
+    if ctx and hasattr(ctx, "request_context"):
+        # We assume request_context is a Starlette-like Request object
+        try:
+            query_user = ctx.request_context.query_params.get("user_id")
+            if query_user:
+                return query_user
+        except (AttributeError, KeyError):
+            pass
+
+    # 2. Fallback to provided argument if not 0 / None
+    if user_id and user_id != 0:
+        return user_id
+
+    # 3. Last fallback: Try session_id from Context
+    if ctx and ctx.session_id:
+        return f"session_{ctx.session_id[:8]}"
+
+    raise ValueError("❌ No user identity found. Please provide a user_id or use a personalized connection URL.")
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  1. ADD EXPENSE
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def add_expense(
-    user_id: int,
     amount: float,
     category: str,
+    user_id: int | str | None = None,
     subcategory: str | None = None,
     note: str | None = None,
     date: str | None = None,
+    ctx: Context | None = None,
 ) -> str:
     """
     Add a new expense for the user.
 
     Args:
-        user_id: The ID of the user.
         amount: Expense amount (must be > 0).
         category: Category name (auto-created if missing).
+        user_id: Optional ID (overridden by URL parameter if present).
         subcategory: Optional subcategory name (auto-created if missing).
         note: Optional note / description.
         date: Date string — supports 'today', 'yesterday', '3 days ago', 'YYYY-MM-DD', etc.
-
-    Returns:
-        Confirmation message with the inserted expense details.
+        ctx: MCP Context (injected automatically).
     """
+    try:
+        user_id = get_user_id(user_id, ctx)
+    except ValueError as e:
+        return str(e)
+
     if amount <= 0:
         return "❌ Amount must be greater than zero."
 
@@ -89,29 +124,32 @@ async def add_expense(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def list_expenses(
-    user_id: int,
     category: str | None = None,
     subcategory: str | None = None,
+    user_id: int | str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     note_search: str | None = None,
     limit: int = 25,
+    ctx: Context | None = None,
 ) -> str:
     """
     List expenses for the user with optional filters.
 
     Args:
-        user_id: The ID of the user.
         category: Filter by category name.
         subcategory: Filter by subcategory name.
+        user_id: Optional ID (overridden by URL parameter if present).
         start_date: Include expenses on or after this date.
         end_date: Include expenses on or before this date.
         note_search: Search keyword within expense notes.
         limit: Maximum number of results (default 25).
-
-    Returns:
-        Formatted table of expenses or a message if none found.
+        ctx: MCP Context (injected automatically).
     """
+    try:
+        user_id = get_user_id(user_id, ctx)
+    except ValueError as e:
+        return str(e)
     conn = await get_connection()
     try:
         query = """
@@ -190,29 +228,33 @@ async def list_expenses(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def smart_update_expense(
-    user_id: int,
     expense_id: int,
     amount: float | None = None,
     category: str | None = None,
     subcategory: str | None = None,
+    user_id: int | str | None = None,
     note: str | None = None,
     date: str | None = None,
+    ctx: Context | None = None,
 ) -> str:
     """
     Update specific fields of an existing expense. Only provided fields are changed.
 
     Args:
-        user_id: The ID of the user.
         expense_id: The ID of the expense to update.
         amount: New amount (optional).
         category: New category name (optional, auto-created if missing).
         subcategory: New subcategory name (optional, auto-created if missing).
+        user_id: Optional ID (overridden by URL parameter if present).
         note: New note (optional).
         date: New date (optional).
-
-    Returns:
-        Confirmation message with updated fields.
+        ctx: MCP Context (injected automatically).
     """
+    try:
+        user_id = get_user_id(user_id, ctx)
+    except ValueError as e:
+        return str(e)
+
     conn = await get_connection()
     try:
         # Verify the expense belongs to the user
@@ -297,21 +339,25 @@ async def smart_update_expense(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def delete_expense(
-    user_id: int,
     expense_id: int,
+    user_id: int | str | None = None,
     confirm: bool = False,
+    ctx: Context | None = None,
 ) -> str:
     """
     Delete an expense by ID. Requires confirm=True for safety.
 
     Args:
-        user_id: The ID of the user.
         expense_id: The ID of the expense to delete.
+        user_id: Optional ID (overridden by URL parameter if present).
         confirm: Must be True to actually delete. If False, shows expense details for review.
-
-    Returns:
-        Confirmation or preview of the expense to be deleted.
+        ctx: MCP Context (injected automatically).
     """
+    try:
+        user_id = get_user_id(user_id, ctx)
+    except ValueError as e:
+        return str(e)
+
     conn = await get_connection()
     try:
         row = await conn.fetchrow(
@@ -363,23 +409,27 @@ async def delete_expense(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def summarize_expenses(
-    user_id: int,
+    user_id: int | str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
     group_by_subcategory: bool = False,
+    ctx: Context | None = None,
 ) -> str:
     """
     Summarize expenses grouped by category (and optionally subcategory) for a date range.
 
     Args:
-        user_id: The ID of the user.
+        user_id: Optional ID (overridden by URL parameter if present).
         start_date: Include expenses on or after this date.
         end_date: Include expenses on or before this date.
         group_by_subcategory: If True, group by category + subcategory.
-
-    Returns:
-        Formatted summary with totals per group.
+        ctx: MCP Context (injected automatically).
     """
+    try:
+        user_id = get_user_id(user_id, ctx)
+    except ValueError as e:
+        return str(e)
+
     conn = await get_connection()
     try:
         if group_by_subcategory:
@@ -459,22 +509,26 @@ async def summarize_expenses(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async def reset_data(
-    user_id: int,
+    user_id: int | str | None = None,
     confirm: bool = False,
     reseed_defaults: bool = True,
+    ctx: Context | None = None,
 ) -> str:
     """
     Delete ALL data (expenses, subcategories, categories) for a user.
     Table structure remains intact. Requires confirm=True for safety.
 
     Args:
-        user_id: The ID of the user.
+        user_id: Optional ID (overridden by URL parameter if present).
         confirm: Must be True to actually reset. If False, shows a warning.
         reseed_defaults: If True, re-seeds default categories after reset.
-
-    Returns:
-        Confirmation message or warning prompt.
+        ctx: MCP Context (injected automatically).
     """
+    try:
+        user_id = get_user_id(user_id, ctx)
+    except ValueError as e:
+        return str(e)
+
     if not confirm:
         return (
             "⚠️ **WARNING**: This will permanently delete ALL your expenses, "

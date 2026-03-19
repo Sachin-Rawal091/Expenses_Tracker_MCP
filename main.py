@@ -26,7 +26,8 @@ mcp = FastMCP(
     instructions=(
         "You are an expense tracking assistant. "
         "Help users manage their personal expenses using the available tools. "
-        "Always require a user_id for every operation. "
+        "User identification (user_id) is handled automatically from the session context. "
+        "You do NOT need to ask for a user_id unless the user explicitly wants to use a different one. "
         "Categories and subcategories are resolved automatically from names. "
         "Dates support natural language like 'today', 'yesterday', '3 days ago'."
     ),
