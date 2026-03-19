@@ -8,12 +8,25 @@ CREATE TABLE IF NOT EXISTS users (
     id BIGSERIAL PRIMARY KEY,
     username VARCHAR(100) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
+    api_key_hash TEXT,
+    api_key_created_at TIMESTAMP,
     auth_provider VARCHAR(50) DEFAULT 'local',
     external_id VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. Categories
+-- 2. Sessions (Persistent access tokens)
+CREATE TABLE IF NOT EXISTS sessions (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    expires_at TIMESTAMP,
+    device_name TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- 3. Categories
 CREATE TABLE IF NOT EXISTS categories (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL,
@@ -23,7 +36,7 @@ CREATE TABLE IF NOT EXISTS categories (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- 3. Subcategories
+-- 4. Subcategories
 CREATE TABLE IF NOT EXISTS subcategories (
     id BIGSERIAL PRIMARY KEY,
     category_id BIGINT NOT NULL,
@@ -35,7 +48,7 @@ CREATE TABLE IF NOT EXISTS subcategories (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- 4. Expenses
+-- 5. Expenses
 CREATE TABLE IF NOT EXISTS expenses (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL,
@@ -50,7 +63,7 @@ CREATE TABLE IF NOT EXISTS expenses (
     FOREIGN KEY (subcategory_id) REFERENCES subcategories(id)
 );
 
--- 5. Validation trigger
+-- 6. Trigger for data isolation
 CREATE OR REPLACE FUNCTION validate_expense_ownership()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -75,7 +88,7 @@ CREATE TRIGGER trg_validate_expense
 BEFORE INSERT OR UPDATE ON expenses
 FOR EACH ROW EXECUTE FUNCTION validate_expense_ownership();
 
--- 6. Seed default categories function
+-- 7. Seed defaults function
 CREATE OR REPLACE FUNCTION seed_default_categories(p_user_id BIGINT)
 RETURNS VOID AS $$
 BEGIN
@@ -107,42 +120,24 @@ BEGIN
     ON CONFLICT (category_id, name) DO NOTHING;
 END;
 $$ LANGUAGE plpgsql;
-
--- 7. Insert a test user
-INSERT INTO users (username, email)
-VALUES ('sachin', 'sachin@example.com')
-ON CONFLICT (username) DO NOTHING;
-
--- 8. Seed default categories for the test user
-SELECT seed_default_categories(
-    (SELECT id FROM users WHERE username = 'sachin')
-);
 """
 
+import asyncio
 
-def main():
-    conn = get_connection()
+async def main():
+    conn = await get_connection()
     try:
-        with conn.cursor() as cur:
-            cur.execute(SCHEMA_SQL)
-        conn.commit()
-        print("✅ Schema applied successfully!")
-        print("✅ Test user 'sachin' created!")
-        print("✅ Default categories seeded!")
-
-        # Show summary
-        with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM categories")
-            cat_count = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM subcategories")
-            sub_count = cur.fetchone()[0]
-            print(f"\n📊 {cat_count} categories, {sub_count} subcategories ready.")
+        await conn.execute(SCHEMA_SQL)
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_key_hash TEXT")
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS api_key_created_at TIMESTAMP")
+        except Exception:
+            pass
+        print("✅ Schema updated with Persistent Sessions support!")
     except Exception as e:
-        conn.rollback()
         print(f"❌ Error: {e}")
     finally:
-        conn.close()
-
+        await conn.close()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

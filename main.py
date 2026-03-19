@@ -15,6 +15,9 @@ from tools import (
     delete_expense,
     summarize_expenses,
     reset_data,
+    register_user,
+    create_session_link,
+    revoke_all_sessions,
 )
 
 # Load .env file for database credentials
@@ -24,12 +27,13 @@ load_dotenv()
 mcp = FastMCP(
     name="Expense Tracker online",
     instructions=(
-        "You are an expense tracking assistant. "
-        "Help users manage their personal expenses using the available tools. "
-        "User identification (user_id) is handled automatically from the session context. "
-        "You do NOT need to ask for a user_id unless the user explicitly wants to use a different one. "
-        "Categories and subcategories are resolved automatically from names. "
-        "Dates support natural language like 'today', 'yesterday', '3 days ago'."
+        "You are a secure expense tracking assistant. "
+        "User identification is handled automatically via secure tokens in the connection URL. "
+        "1. For the OWNER: Access is permanent via the Master Key in your configuration. "
+        "2. For GUESTS: Access is temporary via Session Tokens (sk_sess_...). "
+        "If a user says they are 'unauthenticated' or get an error, advise them to use the `generate_key.py` CLI tool "
+        "and update their connection URL. "
+        "All data is tied to the user's email and kept strictly isolated."
     ),
 )
 
@@ -40,6 +44,9 @@ mcp.tool(smart_update_expense)
 mcp.tool(delete_expense)
 mcp.tool(summarize_expenses)
 mcp.tool(reset_data)
+mcp.tool(register_user)
+mcp.tool(create_session_link)
+mcp.tool(revoke_all_sessions)
 
 
 if __name__ == "__main__":

@@ -34,21 +34,28 @@ def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
     # 3. Web Mode (sse): Prioritize URL parameters
     if transport == "sse" and ctx and hasattr(ctx, "request_context"):
         try:
-            query_user = ctx.request_context.query_params.get("user_id")
-            if query_user:
-                return query_user
+            params = ctx.request_context.query_params
+            
+            # 3a. Session Token Check
+            token = params.get("token")
+            if token and token.startswith("sess_"):
+                return f"TOKEN:{token}"
+                
+            # 3b. Master Key Check
+            master_key = params.get("key")
+            user_email = params.get("user_id")
+            if user_email and master_key and master_key.startswith("sk_live_"):
+                return f"KEY:{user_email}:{master_key}"
+            
         except (AttributeError, KeyError):
             pass
 
-    # 4. Web Fallback: Try session_id from Context
-    if ctx and ctx.session_id:
-        return f"session_{ctx.session_id[:8]}"
-
-    # 5. Last Fallback: User-provided argument
+    # 4. Fallback: User-provided argument directly to tool
     if user_id and user_id != 0:
         return user_id
 
-    raise ValueError("❌ No user identity found. Please provide a user_id or use a personalized connection URL.")
+    # 5. If everything fails, they are unauthenticated.
+    return "unauthenticated"
 
 
 async def resolve_user_id(conn, identifier: str | int) -> int:
@@ -63,8 +70,42 @@ async def resolve_user_id(conn, identifier: str | int) -> int:
     except (ValueError, TypeError):
         pass
 
-    # 2. Treat as a username
-    username = str(identifier).lower().strip()
+    # 2. Treat as a username or token
+    ident = str(identifier).strip()
+    
+    if ident.lower() == "unauthenticated":
+        raise ValueError("❌ You are not connected to a secure vault. Please ask the AI to **register your account** or provide your Master Key/Session Token in the connection URL.")
+    
+    # Session Token Validation
+    if ident.startswith("TOKEN:"):
+        token = ident.split(":", 1)[1]
+        import hashlib
+        sess_hash = hashlib.sha256(token.encode()).hexdigest()
+        row = await conn.fetchrow(
+            "SELECT user_id FROM sessions WHERE token_hash = $1 AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)",
+            sess_hash
+        )
+        if row:
+            return row['user_id']
+        raise ValueError("❌ Session expired or invalid. Please generate a new connection link.")
+        
+    # Master Key Validation
+    if ident.startswith("KEY:"):
+        # Format string is "KEY:email:master_key"
+        parts = ident.split(":", 2)
+        if len(parts) == 3:
+            _, email, key = parts
+            import hashlib
+            key_hash = hashlib.sha256(key.encode()).hexdigest()
+            row = await conn.fetchrow(
+                "SELECT id FROM users WHERE email = $1 AND api_key_hash = $2",
+                email, key_hash
+            )
+            if row:
+                return row['id']
+        raise ValueError("❌ Invalid Master Key or Email.")
+        
+    username = ident.lower()
     if not username:
         raise ValueError("❌ Invalid user identifier.")
 
@@ -80,6 +121,122 @@ async def resolve_user_id(conn, identifier: str | int) -> int:
     )
     await conn.execute("SELECT seed_default_categories($1)", user_id)
     return user_id
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  0.5 SECURITY TOOLS (AI CONCIERGE)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+import secrets
+import hashlib
+from datetime import datetime, timedelta
+
+def _generate_token(prefix="sk_live_"):
+    return prefix + secrets.token_urlsafe(32)
+
+def _hash_string(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+async def register_user(email: str) -> str:
+    """
+    Register a new master email and generate a Master Key.
+    Use this when an unauthenticated user wants to create an account.
+    
+    Args:
+        email: The user's email address.
+    """
+    conn = await get_connection()
+    try:
+        # Check if user already has a key
+        existing = await conn.fetchrow("SELECT api_key_hash FROM users WHERE email = $1", email)
+        if existing and existing['api_key_hash']:
+            return f"❌ The email {email} is already registered. If you lost your key, you must manually reset it in the database."
+        
+        raw_key = _generate_token("sk_live_")
+        hashed_key = _hash_string(raw_key)
+
+        user_id = await conn.fetchval(
+            "INSERT INTO users (username, email) VALUES ($1, $1) "
+            "ON CONFLICT (username) DO UPDATE SET email = EXCLUDED.email RETURNING id",
+            email
+        )
+        await conn.execute(
+            "UPDATE users SET api_key_hash = $1, api_key_created_at = $2 WHERE id = $3",
+            hashed_key, datetime.now(), user_id
+        )
+        await conn.execute("SELECT seed_default_categories($1)", user_id)
+        
+        return (
+            f"✅ **Account Registered!**\n\n"
+            f"**Your Master Key:** `{raw_key}`\n\n"
+            f"⚠️ **SAVE THIS KEY NOW.** It is extremely sensitive and will never be shown to you again.\n"
+            f"To connect permanently to this vault, update your connection URL to:\n"
+            f"`.../sse?user_id={email}&key={raw_key}`"
+        )
+    except Exception as e:
+        return f"❌ Failed to register: {e}"
+    finally:
+        await conn.close()
+
+async def create_session_link(email: str, master_key: str, hours: int = 24) -> str:
+    """
+    Create a persistent/temporary session and return a connection URL.
+    Use this when a registered user wants to connect from the web or share access.
+    
+    Args:
+        email: The user's registered email.
+        master_key: The user's Master Key (sk_live_...).
+        hours: How many hours the session should live (default 24). Pass 0 for a non-expiring link.
+    """
+    conn = await get_connection()
+    try:
+        user = await conn.fetchrow("SELECT id, api_key_hash FROM users WHERE email = $1", email)
+        if not user or _hash_string(master_key) != user['api_key_hash']:
+            return "❌ Invalid master key or email."
+
+        sess_token = _generate_token("sess_")
+        sess_hash = _hash_string(sess_token)
+        
+        expiry = datetime.now() + timedelta(hours=hours) if hours and hours > 0 else None
+
+        await conn.execute(
+            "INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
+            user['id'], sess_hash, expiry
+        )
+        
+        expiry_str = f"Expires in {hours}h" if hours and hours > 0 else "Never Expires (Persistent)"
+        return (
+            f"✅ **Session Created** ({expiry_str})\n\n"
+            f"**Your Session Token:** `{sess_token}`\n"
+            f"To connect using this session, use the URL parameter:\n"
+            f"`.../sse?token={sess_token}`"
+        )
+    except Exception as e:
+        return f"❌ Failed to create session: {e}"
+    finally:
+        await conn.close()
+
+async def revoke_all_sessions(email: str, master_key: str) -> str:
+    """
+    Revoke all active web sessions for a user, instantly severing remote access.
+    
+    Args:
+        email: The user's registered email.
+        master_key: The user's Master Key.
+    """
+    conn = await get_connection()
+    try:
+        user = await conn.fetchrow("SELECT id, api_key_hash FROM users WHERE email = $1", email)
+        if not user or _hash_string(master_key) != user['api_key_hash']:
+            return "❌ Invalid credentials."
+
+        res = await conn.execute("DELETE FROM sessions WHERE user_id = $1", user['id'])
+        deleted_count = int(res.split(" ")[1]) if res else 0
+        return f"✅ Instantly revoked {deleted_count} active sessions for {email}."
+    except Exception as e:
+        return f"❌ Failed to revoke sessions: {e}"
+    finally:
+        await conn.close()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
