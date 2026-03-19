@@ -48,9 +48,10 @@ def clean_text(text: str | None) -> str | None:
     return cleaned if cleaned else None
 
 
-def normalize_date(text: str | None) -> str | None:
+def normalize_date(text: str | None) -> datetime.date | None:
     """
-    Convert natural-language or loose date strings to YYYY-MM-DD.
+    Convert natural-language or loose date strings to datetime.date objects.
+    (asyncpg strictly requires native date/datetime objects for PostgreSQL DATE types)
 
     Supports:
       - "today", "yesterday", "day before yesterday"
@@ -65,11 +66,11 @@ def normalize_date(text: str | None) -> str | None:
     today = datetime.now().date()
 
     if text == "today":
-        return str(today)
+        return today
     if text == "yesterday":
-        return str(today - timedelta(days=1))
+        return today - timedelta(days=1)
     if text in ("day before yesterday", "day before"):
-        return str(today - timedelta(days=2))
+        return today - timedelta(days=2)
 
     match = re.match(r"(\d+)\s*(day|days|week|weeks)\s*ago", text)
     if match:
@@ -77,11 +78,11 @@ def normalize_date(text: str | None) -> str | None:
         unit = match.group(2)
         if unit.startswith("week"):
             n *= 7
-        return str(today - timedelta(days=n))
+        return today - timedelta(days=n)
 
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%m/%d/%Y"):
         try:
-            return str(datetime.strptime(text, fmt).date())
+            return datetime.strptime(text, fmt).date()
         except ValueError:
             continue
 
