@@ -17,3 +17,7 @@ __pycache__/
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Temporary test files & logs
+out.txt
+test_key_flow.py
