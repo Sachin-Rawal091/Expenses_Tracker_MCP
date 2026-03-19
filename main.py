@@ -41,15 +41,24 @@ mcp = FastMCP(
 @mcp.on_startup
 async def do_startup():
     """
-    Ensures the database schema is up-to-date as soon as the server boots.
+    Ensures the database schema is up-to-date in the background.
+    Does NOT block the server from starting.
     """
     from setup_db import main as setup_database
-    try:
-        print("🔄 Database Auto-Sync starting...")
-        await setup_database()
-        print("✅ Database Auto-Sync complete.")
-    except Exception as e:
-        print(f"⚠️ Database Auto-Sync failed: {e}")
+    import asyncio
+    
+    async def run_sync():
+        try:
+            print("🔄 [Background] Database Auto-Sync starting...")
+            await setup_database()
+            print("✅ [Background] Database Auto-Sync complete.")
+        except Exception as e:
+            print(f"⚠️ [Background] Database Auto-Sync failed: {e}")
+            
+    # CRITICAL: We don't await run_sync() here. 
+    # We fire it off so the server can bind to the port immediately.
+    asyncio.create_task(run_sync())
+
 
 # ── Register tools ──
 mcp.tool(add_expense)
