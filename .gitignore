@@ -1,0 +1,19 @@
+# Environment variables (contains database credentials)
+.env
+
+# uv & Python virtual environments
+.venv/
+.uv/
+
+# Python compiled bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# IDEs & Editor settings
+.vscode/
+.idea/
+
+# OS specific files
+.DS_Store
+Thumbs.db
