@@ -155,9 +155,9 @@ async def register_user(email: str) -> str:
         hashed_key = _hash_string(raw_key)
 
         user_id = await conn.fetchval(
-            "INSERT INTO users (username, email) VALUES ($1, $1) "
+            "INSERT INTO users (username, email) VALUES ($1, $2) "
             "ON CONFLICT (username) DO UPDATE SET email = EXCLUDED.email RETURNING id",
-            email
+            email.lower(), email
         )
         await conn.execute(
             "UPDATE users SET api_key_hash = $1, api_key_created_at = $2 WHERE id = $3",
@@ -189,7 +189,7 @@ async def create_session_link(email: str, master_key: str, hours: int = 24) -> s
     """
     conn = await get_connection()
     try:
-        user = await conn.fetchrow("SELECT id, api_key_hash FROM users WHERE email = $1", email)
+        user = await conn.fetchrow("SELECT id, api_key_hash FROM users WHERE LOWER(email) = LOWER($1)", email)
         if not user or _hash_string(master_key) != user['api_key_hash']:
             return "❌ Invalid master key or email."
 
@@ -227,7 +227,7 @@ async def revoke_all_sessions(email: str, master_key: str) -> str:
     """
     conn = await get_connection()
     try:
-        user = await conn.fetchrow("SELECT id, api_key_hash FROM users WHERE email = $1", email)
+        user = await conn.fetchrow("SELECT id, api_key_hash FROM users WHERE LOWER(email) = LOWER($1)", email)
         if not user or _hash_string(master_key) != user['api_key_hash']:
             return "❌ Invalid credentials."
 

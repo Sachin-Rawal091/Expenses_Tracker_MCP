@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
     external_id VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username));
 
 -- 2. Sessions (Persistent access tokens)
 CREATE TABLE IF NOT EXISTS sessions (
@@ -111,7 +112,7 @@ BEGIN
     inserted_categories AS (
         INSERT INTO categories (user_id, name)
         SELECT p_user_id, key FROM data
-        ON CONFLICT (user_id, name) DO NOTHING
+        ON CONFLICT DO NOTHING
         RETURNING id, name
     )
     INSERT INTO subcategories (category_id, user_id, name)
@@ -119,7 +120,7 @@ BEGIN
     FROM data d
     JOIN categories c ON c.name = d.key AND c.user_id = p_user_id
     CROSS JOIN LATERAL jsonb_array_elements_text(d.value) AS sub(value)
-    ON CONFLICT (category_id, name) DO NOTHING;
+    ON CONFLICT DO NOTHING;
 END;
 $$ LANGUAGE plpgsql;
 """
