@@ -24,7 +24,7 @@ def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
     Resolve the user_id from arguments or session context.
     Automatically detects if we are in local (stdio) or web (sse) mode.
     """
-    # 1. Identify context
+    # 1. Identify transport
     transport = getattr(ctx, "transport", "stdio")
 
     # 2. Local Mode (stdio): Default to a fixed local user
@@ -32,22 +32,34 @@ def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
         return user_id if (user_id and user_id != 0) else "local_owner"
 
     # 3. Web Mode (sse): Prioritize URL parameters
-    if transport == "sse" and ctx and hasattr(ctx, "request_context"):
+    if transport == "sse" and ctx:
+        # Try multiple ways to find query parameters in FastMCP's evolving context
+        params = {}
+        
+        # Method A: ctx.request_context.query_params (Starlette style)
+        if hasattr(ctx, "request_context") and ctx.request_context:
+            if hasattr(ctx.request_context, "query_params"):
+                params = ctx.request_context.query_params
+            elif hasattr(ctx.request_context, "request") and hasattr(ctx.request_context.request, "query_params"):
+                params = ctx.request_context.request.query_params
+
+        # Method B: Fallback to session metadata if preserved there
+        if not params and hasattr(ctx, "session") and ctx.session:
+            params = getattr(ctx.session, "metadata", {})
+
         try:
-            params = ctx.request_context.query_params
-            
             # 3a. Session Token Check
             token = params.get("token")
-            if token and token.startswith("sess_"):
+            if token and str(token).startswith("sess_"):
                 return f"TOKEN:{token}"
                 
             # 3b. Master Key Check
             master_key = params.get("key")
             user_email = params.get("user_id")
-            if user_email and master_key and master_key.startswith("sk_live_"):
+            if user_email and master_key and str(master_key).startswith("sk_live_"):
                 return f"KEY:{user_email}:{master_key}"
             
-        except (AttributeError, KeyError):
+        except (AttributeError, KeyError, TypeError):
             pass
             
         # ⚠️ CRITICAL: In SSE mode, if we haven't found a KEY or TOKEN in the URL, 
@@ -102,7 +114,7 @@ async def resolve_user_id(conn, identifier: str | int) -> int:
             import hashlib
             key_hash = hashlib.sha256(key.encode()).hexdigest()
             row = await conn.fetchrow(
-                "SELECT id FROM users WHERE email = $1 AND api_key_hash = $2",
+                "SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND api_key_hash = $2",
                 email, key_hash
             )
             if row:
@@ -146,8 +158,8 @@ async def register_user(email: str) -> str:
     """
     conn = await get_connection()
     try:
-        # Check if user already has a key
-        existing = await conn.fetchrow("SELECT api_key_hash FROM users WHERE email = $1", email)
+        # Check if user already has a key (Case-Insensitive)
+        existing = await conn.fetchrow("SELECT api_key_hash FROM users WHERE LOWER(email) = LOWER($1)", email)
         if existing and existing['api_key_hash']:
             return f"❌ The email {email} is already registered. If you lost your key, you must manually reset it in the database."
         
