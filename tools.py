@@ -19,7 +19,39 @@ from database import (
 #  0. HELPER: GET USER ID
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
+def _normalize_params(params_raw) -> dict[str, str]:
+    """Normalize query/session params into a lowercase string dict."""
+    params: dict[str, str] = {}
+    if not params_raw:
+        return params
+
+    try:
+        items = params_raw.items() if hasattr(params_raw, "items") else []
+        for key, value in items:
+            clean_key = key.decode() if isinstance(key, bytes) else str(key)
+            clean_value = value.decode() if isinstance(value, bytes) else str(value)
+            params[clean_key.lower().strip()] = clean_value.strip()
+    except Exception:
+        return {}
+
+    return params
+
+
+def _identifier_from_params(params: dict[str, str]) -> int | str | None:
+    """Build an auth identifier from normalized params if possible."""
+    master_key = params.get("key")
+    user_email = params.get("user_id") or params.get("email")
+    if user_email and master_key and master_key.startswith("sk_live_"):
+        return f"KEY:{user_email}:{master_key}"
+
+    token = params.get("token")
+    if token and token.startswith("sess_"):
+        return f"TOKEN:{token}"
+
+    return None
+
+
+async def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
     """
     Resolve the user_id from arguments or session context.
     Automatically detects if we are in local (stdio) or web (sse) mode.
@@ -31,58 +63,35 @@ def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
     if transport == "stdio":
         return user_id if (user_id and user_id != 0) else "local_owner"
 
-    # 3. Web Mode (sse): Prioritize URL parameters
+    # 3. Web Mode (sse): prefer session-scoped auth captured during initialize.
     if transport == "sse" and ctx:
-        # Try multiple ways to find query parameters in FastMCP's evolving context
+        try:
+            session_identifier = await ctx.get_state("auth_identifier")
+            if session_identifier:
+                return str(session_identifier)
+        except Exception:
+            pass
+
+        # Fallback: try the current request if query params are still present.
         params_raw = {}
-        
-        # Method A: ctx.request_context (Common in older FastMCP)
+
         if hasattr(ctx, "request_context") and ctx.request_context:
             if hasattr(ctx.request_context, "query_params"):
                 params_raw = ctx.request_context.query_params
             elif hasattr(ctx.request_context, "request") and hasattr(ctx.request_context.request, "query_params"):
                 params_raw = ctx.request_context.request.query_params
 
-        # Method B: ctx.request (Common in newer FastMCP)
         if not params_raw and hasattr(ctx, "request") and ctx.request:
             if hasattr(ctx.request, "query_params"):
                 params_raw = ctx.request.query_params
 
-        # Method C: Fallback to session metadata if preserved there
         if not params_raw and hasattr(ctx, "session") and ctx.session:
             params_raw = getattr(ctx.session, "metadata", {})
 
-        # Super-Robust Cleaning (Handles bytes, mixed case, and whitespace)
-        params = {}
-        if params_raw:
-            try:
-                # QueryParams.items() or dict.items()
-                items = params_raw.items() if hasattr(params_raw, "items") else []
-                for k, v in items:
-                    key = k.decode() if isinstance(k, bytes) else str(k)
-                    val = v.decode() if isinstance(v, bytes) else str(v)
-                    params[key.lower().strip()] = val.strip()
-            except Exception:
-                pass
+        identifier = _identifier_from_params(_normalize_params(params_raw))
+        if identifier:
+            return identifier
 
-        try:
-            # 3a. Master Key Check (Highest priority)
-            # Support both 'user_id' and 'email' parameter names for flexibility
-            master_key = params.get("key")
-            user_email = params.get("user_id") or params.get("email")
-            
-            if user_email and master_key and master_key.startswith("sk_live_"):
-                return f"KEY:{user_email}:{master_key}"
-
-            # 3b. Session Token Check
-            token = params.get("token")
-            if token and token.startswith("sess_"):
-                return f"TOKEN:{token}"
-            
-        except (AttributeError, KeyError, TypeError):
-            pass
-            
-        # ⚠️ CRITICAL: In SSE mode, if we haven't found a KEY or TOKEN, do not fallback.
         return "unauthenticated"
 
     # 4. Local Fallback: User-provided argument directly to tool
@@ -301,7 +310,7 @@ async def add_expense(
         ctx: MCP Context (injected automatically).
     """
     try:
-        user_id_raw = get_user_id(user_id, ctx)
+        user_id_raw = await get_user_id(user_id, ctx)
     except ValueError as e:
         return str(e)
 
@@ -380,7 +389,7 @@ async def list_expenses(
         ctx: MCP Context (injected automatically).
     """
     try:
-        user_id_raw = get_user_id(user_id, ctx)
+        user_id_raw = await get_user_id(user_id, ctx)
     except ValueError as e:
         return str(e)
 
@@ -491,7 +500,7 @@ async def smart_update_expense(
         ctx: MCP Context (injected automatically).
     """
     try:
-        user_id_raw = get_user_id(user_id, ctx)
+        user_id_raw = await get_user_id(user_id, ctx)
     except ValueError as e:
         return str(e)
 
@@ -602,7 +611,7 @@ async def delete_expense(
         ctx: MCP Context (injected automatically).
     """
     try:
-        user_id_raw = get_user_id(user_id, ctx)
+        user_id_raw = await get_user_id(user_id, ctx)
     except ValueError as e:
         return str(e)
 
@@ -677,7 +686,7 @@ async def summarize_expenses(
         ctx: MCP Context (injected automatically).
     """
     try:
-        user_id_raw = get_user_id(user_id, ctx)
+        user_id_raw = await get_user_id(user_id, ctx)
     except ValueError as e:
         return str(e)
 
@@ -783,7 +792,7 @@ async def reset_data(
         ctx: MCP Context (injected automatically).
     """
     try:
-        user_id_raw = get_user_id(user_id, ctx)
+        user_id_raw = await get_user_id(user_id, ctx)
     except ValueError as e:
         return str(e)
 

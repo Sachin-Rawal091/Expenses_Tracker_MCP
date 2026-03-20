@@ -7,6 +7,8 @@ Registers all expense tools and starts the MCP server.
 import os
 from dotenv import load_dotenv
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_request
+from fastmcp.server.middleware.middleware import Middleware
 
 from tools import (
     add_expense,
@@ -20,6 +22,33 @@ from tools import (
     revoke_all_sessions,
     ping_server,
 )
+
+
+class SessionAuthMiddleware(Middleware):
+    """Persist auth from the initial SSE request into FastMCP session state."""
+
+    async def on_initialize(self, context, call_next):
+        ctx = context.fastmcp_context
+        if ctx is not None:
+            try:
+                request = get_http_request()
+                params = {
+                    str(key).lower().strip(): str(value).strip()
+                    for key, value in request.query_params.items()
+                }
+
+                master_key = params.get("key")
+                user_email = params.get("user_id") or params.get("email")
+                token = params.get("token")
+
+                if user_email and master_key and master_key.startswith("sk_live_"):
+                    await ctx.set_state("auth_identifier", f"KEY:{user_email}:{master_key}")
+                elif token and token.startswith("sess_"):
+                    await ctx.set_state("auth_identifier", f"TOKEN:{token}")
+            except Exception:
+                pass
+
+        return await call_next(context)
 
 # Load .env file for database credentials
 load_dotenv()
@@ -37,6 +66,8 @@ mcp = FastMCP(
         "All data is tied to the user's email and kept strictly isolated."
     ),
 )
+
+mcp.add_middleware(SessionAuthMiddleware())
 
 # ── Register tools ──
 mcp.tool(add_expense)
