@@ -36,24 +36,41 @@ def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
         # Try multiple ways to find query parameters in FastMCP's evolving context
         params_raw = {}
         
-        # Method A: ctx.request_context.query_params (Starlette style)
+        # Method A: ctx.request_context (Common in older FastMCP)
         if hasattr(ctx, "request_context") and ctx.request_context:
             if hasattr(ctx.request_context, "query_params"):
                 params_raw = ctx.request_context.query_params
             elif hasattr(ctx.request_context, "request") and hasattr(ctx.request_context.request, "query_params"):
                 params_raw = ctx.request_context.request.query_params
 
-        # Method B: Fallback to session metadata if preserved there
+        # Method B: ctx.request (Common in newer FastMCP)
+        if not params_raw and hasattr(ctx, "request") and ctx.request:
+            if hasattr(ctx.request, "query_params"):
+                params_raw = ctx.request.query_params
+
+        # Method C: Fallback to session metadata if preserved there
         if not params_raw and hasattr(ctx, "session") and ctx.session:
             params_raw = getattr(ctx.session, "metadata", {})
 
-        # Clean and normalize parameters
-        params = {str(k).lower(): str(v).strip() for k, v in params_raw.items()} if params_raw else {}
+        # Super-Robust Cleaning (Handles bytes, mixed case, and whitespace)
+        params = {}
+        if params_raw:
+            try:
+                # QueryParams.items() or dict.items()
+                items = params_raw.items() if hasattr(params_raw, "items") else []
+                for k, v in items:
+                    key = k.decode() if isinstance(k, bytes) else str(k)
+                    val = v.decode() if isinstance(v, bytes) else str(v)
+                    params[key.lower().strip()] = val.strip()
+            except Exception:
+                pass
 
         try:
-            # 3a. Master Key Check (Higher priority than temporary tokens)
+            # 3a. Master Key Check (Highest priority)
+            # Support both 'user_id' and 'email' parameter names for flexibility
             master_key = params.get("key")
-            user_email = params.get("user_id")
+            user_email = params.get("user_id") or params.get("email")
+            
             if user_email and master_key and master_key.startswith("sk_live_"):
                 return f"KEY:{user_email}:{master_key}"
 
@@ -65,8 +82,7 @@ def get_user_id(user_id: int | str | None, ctx: Context | None) -> int | str:
         except (AttributeError, KeyError, TypeError):
             pass
             
-        # ⚠️ CRITICAL: In SSE mode, if we haven't found a KEY or TOKEN in the URL, 
-        # we MUST NOT fall back to a user-provided tool argument.
+        # ⚠️ CRITICAL: In SSE mode, if we haven't found a KEY or TOKEN, do not fallback.
         return "unauthenticated"
 
     # 4. Local Fallback: User-provided argument directly to tool
