@@ -20,6 +20,7 @@ from tools import (
     register_user,
     create_session_link,
     revoke_all_sessions,
+    logout,
     ping_server,
 )
 
@@ -79,6 +80,7 @@ mcp.tool(reset_data)
 mcp.tool(register_user)
 mcp.tool(create_session_link)
 mcp.tool(revoke_all_sessions)
+mcp.tool(logout)
 mcp.tool(ping_server)
 
 

@@ -236,18 +236,19 @@ async def create_session_link(email: str, master_key: str, hours: int = 24) -> s
         sess_token = _generate_token("sess_")
         sess_hash = _hash_string(sess_token)
         
-        if hours <= 0:
-            return "❌ Session duration must be at least 1 hour."
-            
-        expiry = datetime.now() + timedelta(hours=hours)
-
+        # Support for non-expiring sessions (hours=0)
+        expiry = None
+        if hours > 0:
+            expiry = datetime.now() + timedelta(hours=hours)
+        
         await conn.execute(
             "INSERT INTO sessions (user_id, token_hash, expires_at) VALUES ($1, $2, $3)",
             user['id'], sess_hash, expiry
         )
         
+        expiry_label = f"Expires in {hours}h" if hours > 0 else "Never Expires"
         return (
-            f"✅ **Session Created** (Expires in {hours}h)\n\n"
+            f"✅ **Session Created** ({expiry_label})\n\n"
             f"**Your Session Token:** `{sess_token}`\n"
             f"To connect using this session, use the URL parameter:\n"
             f"`.../sse?token={sess_token}`"
@@ -278,6 +279,33 @@ async def revoke_all_sessions(email: str, master_key: str) -> str:
         return f"❌ Failed to revoke sessions: {e}"
     finally:
         await conn.close()
+
+
+async def logout(ctx: Context | None = None) -> str:
+    """
+    Instantly logout and invalidate the current session token.
+    Use this when you want to terminate your current remote access.
+    """
+    if not ctx:
+        return "❌ Logout only works in a session-aware environment (SSE)."
+    
+    try:
+        session_identifier = await ctx.get_state("auth_identifier")
+        if session_identifier and session_identifier.startswith("TOKEN:"):
+            token = session_identifier.split(":", 1)[1].strip()
+            import hashlib
+            sess_hash = hashlib.sha256(token.encode()).hexdigest()
+            
+            conn = await get_connection()
+            try:
+                await conn.execute("DELETE FROM sessions WHERE token_hash = $1", sess_hash)
+                return "✅ **Logout Successful.** This session link has been permanently invalidated."
+            finally:
+                await conn.close()
+        
+        return "❌ No active session token found to logout. (Are you connected via Master Key?)"
+    except Exception as e:
+        return f"❌ Failed to logout: {e}"
 
 
 async def ping_server() -> str:
