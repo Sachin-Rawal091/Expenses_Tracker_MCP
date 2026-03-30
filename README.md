@@ -54,9 +54,29 @@ Add this to your `mcpServers.json` for persistent local access via **Stdio**:
 
 #### **Remote Web Access (Claude.ai SSE)**
 Access your vault securely from any device via **SSE**:
-1. **Generate Token**: Tell the AI: `"Create a session link for 24 hours"` or `"Create a persistent session link"` (pass `hours=0`).
-2. **Setup**: Go to **Settings > MCP Servers** in Claude.ai.
-3. **Logout**: Simply tell the AI `"logout"` to instantly invalidate your current remote session.
+
+**🌐 Server URL (deployed on Railway):**
+```
+https://mcpremote-production.up.railway.app/sse
+```
+
+1. **First-time setup (unauthenticated)**:
+   Connect with the bare SSE URL above, then tell the AI: `"Register me as [your-email]!"` to create your vault and receive a **Master Key**.
+
+2. **Permanent connection via Master Key**:
+   Go to **Settings → MCP Servers** in Claude.ai and add:
+   ```
+   https://mcpremote-production.up.railway.app/sse?user_id=YOUR_EMAIL&key=sk_live_...
+   ```
+
+3. **Generate a Session Token** (for sharing / guest access):
+   Tell the AI: `"Create a session link for 24 hours"` or `"Create a persistent session link"` (pass `hours=0`).
+   Use the returned token as:
+   ```
+   https://mcpremote-production.up.railway.app/sse?token=sess_...
+   ```
+
+4. **Logout**: Tell the AI `"logout"` to instantly invalidate your current remote session.
 
 ---
 
