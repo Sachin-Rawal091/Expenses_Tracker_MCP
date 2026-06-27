@@ -57,7 +57,7 @@ Access your vault securely from any device via **SSE**:
 
 **🌐 Server URL (deployed on Railway):**
 ```
-https://mcpremote-production.up.railway.app/sse
+  https://mcpremote-production.up.railway.app/sse
 ```
 
 1. **First-time setup (unauthenticated)**:
@@ -66,7 +66,7 @@ https://mcpremote-production.up.railway.app/sse
 2. **Permanent connection via Master Key**:
    Go to **Settings → MCP Servers** in Claude.ai and add:
    ```
-   https://mcpremote-production.up.railway.app/sse?user_id=YOUR_EMAIL&key=sk_live_...
+   https://expenses-tracker-mcp.onrender.com/sse?user_id=YOUR_EMAIL&key=sk_live_...
    ```
 
 3. **Generate a Session Token** (for sharing / guest access):
