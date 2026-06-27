@@ -73,7 +73,7 @@ Access your vault securely from any device via **SSE**:
    Tell the AI: `"Create a session link for 24 hours"` or `"Create a persistent session link"` (pass `hours=0`).
    Use the returned token as:
    ```
-  https://expenses-tracker-mcp.onrender.com/sse?token=sess_...
+   https://expenses-tracker-mcp.onrender.com/sse?token=sess_...
    ```
 
 4. **Logout**: Tell the AI `"logout"` to instantly invalidate your current remote session.
