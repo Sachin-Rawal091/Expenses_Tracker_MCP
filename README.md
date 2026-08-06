@@ -57,7 +57,7 @@ Access your vault securely from any device via **SSE**:
 
 **🌐 Server URL (deployed on Railway):**
 ```
-  https://mcpremote-production.up.railway.app/sse
+ https://expenses-tracker-mcp.onrender.com/sse
 ```
 
 1. **First-time setup (unauthenticated)**:
